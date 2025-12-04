@@ -418,6 +418,7 @@ typedef struct {
   gboolean header_tips;
   gchar *col_align;
   gchar *hdr_align;
+  gchar *select_row;
 } YadListData;
 
 typedef struct {
