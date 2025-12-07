@@ -84,6 +84,111 @@ icon_cb (GtkEntry * entry, GtkEntryIconPosition pos, GdkEventButton * event, gpo
     }
 }
 
+/* Trigger completion helper functions */
+static YadTriggerSource *
+find_trigger_source (gchar trigger_char)
+{
+  GSList *l;
+
+  for (l = options.common_data.trigger_sources; l != NULL; l = l->next)
+    {
+      YadTriggerSource *src = (YadTriggerSource *) l->data;
+      if (src->trigger_char == trigger_char)
+        return src;
+    }
+  return NULL;
+}
+
+static gboolean
+is_trigger_char (gchar c)
+{
+  if (options.common_data.trigger_chars == NULL)
+    return FALSE;
+  return (strchr (options.common_data.trigger_chars, c) != NULL);
+}
+
+static void
+update_trigger_completion (GtkEntry *entry, gchar trigger_char)
+{
+  YadTriggerSource *src;
+  GtkEntryCompletion *completion;
+  GtkListStore *store;
+  GtkTreeIter iter;
+  FILE *pf;
+  gchar buf[1024];
+
+  src = find_trigger_source (trigger_char);
+  if (!src || !src->source_cmd)
+    return;
+
+  completion = gtk_entry_get_completion (entry);
+  if (!completion)
+    return;
+
+  store = GTK_LIST_STORE (gtk_entry_completion_get_model (completion));
+  if (!store)
+    return;
+
+  /* Clear existing items */
+  gtk_list_store_clear (store);
+
+  /* Execute command and populate completion */
+  pf = popen (src->source_cmd, "r");
+  if (pf)
+    {
+      while (fgets (buf, sizeof (buf), pf))
+        {
+          /* Remove trailing newline */
+          gint len = strlen (buf);
+          if (len > 0 && buf[len - 1] == '\n')
+            buf[len - 1] = '\0';
+
+          if (buf[0] != '\0')
+            {
+              gchar *item;
+
+              /* Optionally include trigger prefix in completion item */
+              if (options.common_data.trigger_prefix)
+                item = g_strdup_printf ("%c%s", trigger_char, buf);
+              else
+                item = g_strdup (buf);
+
+              gtk_list_store_append (store, &iter);
+              gtk_list_store_set (store, &iter, 0, item, -1);
+              g_free (item);
+            }
+        }
+      pclose (pf);
+    }
+
+  /* Force completion popup to show */
+  gtk_entry_completion_complete (completion);
+}
+
+static void
+trigger_entry_changed_cb (GtkEditable *editable, gpointer data)
+{
+  GtkEntry *entry = GTK_ENTRY (editable);
+  const gchar *text;
+  gint cursor_pos;
+
+  if (options.common_data.complete != YAD_COMPLETE_TRIGGER)
+    return;
+
+  text = gtk_entry_get_text (entry);
+  cursor_pos = gtk_editable_get_position (editable);
+
+  /* Check if the character before cursor is a trigger */
+  if (cursor_pos > 0 && text[cursor_pos - 1] != '\0')
+    {
+      gchar c = text[cursor_pos - 1];
+      if (is_trigger_char (c))
+        {
+          update_trigger_completion (entry, c);
+        }
+    }
+}
+
 static GtkTreeModel *
 create_completion_model (void)
 {
@@ -252,7 +357,7 @@ entry_create_widget (GtkWidget * dlg)
       if (options.common_data.hide_text)
         g_object_set (G_OBJECT (entry), "visibility", FALSE, NULL);
 
-      if (options.entry_data.completion)
+      if (options.entry_data.completion || options.common_data.complete == YAD_COMPLETE_TRIGGER)
         {
           GtkEntryCompletion *completion;
           GtkTreeModel *completion_model;
@@ -266,7 +371,14 @@ entry_create_widget (GtkWidget * dlg)
 
           gtk_entry_completion_set_text_column (completion, 0);
 
-          if (options.common_data.complete != YAD_COMPLETE_SIMPLE)
+          if (options.common_data.complete == YAD_COMPLETE_TRIGGER)
+            {
+              /* For trigger completion, set minimum key length to 1 */
+              gtk_entry_completion_set_minimum_key_length (completion, 1);
+              /* Connect changed signal to detect trigger characters */
+              g_signal_connect (G_OBJECT (entry), "changed", G_CALLBACK (trigger_entry_changed_cb), NULL);
+            }
+          else if (options.common_data.complete != YAD_COMPLETE_SIMPLE)
             gtk_entry_completion_set_match_func (completion, check_complete, NULL, NULL);
 
           g_object_unref (completion);

@@ -50,6 +50,7 @@ static gboolean parse_signal (const gchar *, const gchar *, gpointer, GError **)
 #endif
 static gboolean add_image_path (const gchar *, const gchar *, gpointer, GError **);
 static gboolean set_complete_type (const gchar *, const gchar *, gpointer, GError **);
+static gboolean add_trigger_source (const gchar *, const gchar *, gpointer, GError **);
 static gboolean set_bool_fmt_type (const gchar *, const gchar *, gpointer, GError **);
 static gboolean set_grid_lines (const gchar *, const gchar *, gpointer, GError **);
 static gboolean set_scroll_policy (const gchar *, const gchar *, gpointer, GError **);
@@ -361,6 +362,13 @@ static GOptionEntry entry_options[] = {
     N_("Set the right entry icon"), N_("IMAGE") },
   { "ricon-action", 0, 0, G_OPTION_ARG_STRING, &options.entry_data.ricon_action,
     N_("Set the right entry icon action"), N_("CMD") },
+  /* Trigger completion options */
+  { "trigger-completion", 0, 0, G_OPTION_ARG_STRING, &options.common_data.trigger_chars,
+    N_("Set characters that trigger dynamic completion (e.g., @/)"), N_("CHARS") },
+  { "trigger-source", 0, 0, G_OPTION_ARG_CALLBACK, add_trigger_source,
+    N_("Set completion source command for trigger character (e.g., @:get_users.sh)"), N_("CHAR:CMD") },
+  { "trigger-prefix", 0, 0, G_OPTION_ARG_NONE, &options.common_data.trigger_prefix,
+    N_("Include trigger character in completion output"), NULL },
   { NULL }
 };
 
@@ -1307,6 +1315,39 @@ set_complete_type (const gchar * option_name, const gchar * value, gpointer data
 }
 
 static gboolean
+add_trigger_source (const gchar * option_name, const gchar * value, gpointer data, GError ** err)
+{
+  YadTriggerSource *src;
+  gchar *colon;
+
+  /* Format: CHAR:CMD (e.g., @:get_users.sh) */
+  if (!value || strlen (value) < 3)
+    {
+      g_printerr (_("Invalid trigger source format. Use CHAR:CMD (e.g., @:get_users.sh)\n"));
+      return FALSE;
+    }
+
+  colon = strchr (value, ':');
+  if (!colon || colon == value || colon[1] == '\0')
+    {
+      g_printerr (_("Invalid trigger source format. Use CHAR:CMD (e.g., @:get_users.sh)\n"));
+      return FALSE;
+    }
+
+  src = g_new0 (YadTriggerSource, 1);
+  src->trigger_char = value[0];
+  src->source_cmd = g_strdup (colon + 1);
+
+  /* Add to common data triggers (shared between entry and form) */
+  options.common_data.trigger_sources = g_slist_append (options.common_data.trigger_sources, src);
+
+  /* Enable trigger completion mode */
+  options.common_data.complete = YAD_COMPLETE_TRIGGER;
+
+  return TRUE;
+}
+
+static gboolean
 set_bool_fmt_type (const gchar * option_name, const gchar * value, gpointer data, GError ** err)
 {
   switch (value[0])
@@ -1745,6 +1786,10 @@ yad_options_init (void)
   options.common_data.key = -1;
   options.common_data.bool_fmt = YAD_BOOL_FMT_UT;
   options.common_data.complete = YAD_COMPLETE_SIMPLE;
+  /* Trigger completion */
+  options.common_data.trigger_chars = NULL;
+  options.common_data.trigger_sources = NULL;
+  options.common_data.trigger_prefix = FALSE;
   options.common_data.icon_size = 0;
   options.common_data.scroll = FALSE;
   options.common_data.enable_search = TRUE;
@@ -1802,6 +1847,10 @@ yad_options_init (void)
   options.entry_data.licon_action = NULL;
   options.entry_data.ricon = NULL;
   options.entry_data.ricon_action = NULL;
+  /* Trigger completion */
+  options.entry_data.trigger_chars = NULL;
+  options.entry_data.trigger_sources = NULL;
+  options.entry_data.trigger_prefix = FALSE;
 
   /* Initialize file data */
   options.file_data.directory = FALSE;

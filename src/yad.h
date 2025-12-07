@@ -180,8 +180,15 @@ typedef enum {
   YAD_COMPLETE_SIMPLE = 0,
   YAD_COMPLETE_ANY,
   YAD_COMPLETE_ALL,
-  YAD_COMPLETE_REGEX
+  YAD_COMPLETE_REGEX,
+  YAD_COMPLETE_TRIGGER   /* Triggered completion (e.g., @, /) */
 } YadCompletionType;
+
+/* Trigger completion configuration */
+typedef struct {
+  gchar trigger_char;      /* Character that triggers completion (e.g., '@', '/') */
+  gchar *source_cmd;       /* Command to fetch completion data */
+} YadTriggerSource;
 
 typedef enum {
   YAD_BOOL_FMT_UT,
@@ -332,6 +339,10 @@ typedef struct {
   gchar *licon_action;
   gchar *ricon;
   gchar *ricon_action;
+  /* Trigger completion fields */
+  gchar *trigger_chars;          /* Characters that trigger completion (e.g., "@/") */
+  GSList *trigger_sources;       /* List of YadTriggerSource for each trigger char */
+  gboolean trigger_prefix;       /* Include trigger char in completion output */
 } YadEntryData;
 
 typedef struct {
@@ -551,6 +562,10 @@ typedef struct {
 #endif
   YadBoolFormat bool_fmt;
   YadCompletionType complete;
+  /* Trigger completion (shared for entry and form fields) */
+  gchar *trigger_chars;          /* Characters that trigger completion */
+  GSList *trigger_sources;       /* List of YadTriggerSource */
+  gboolean trigger_prefix;       /* Include trigger char in output */
   GList *filters;
   key_t key;
 #ifdef HAVE_SPELL
