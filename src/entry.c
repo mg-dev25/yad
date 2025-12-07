@@ -107,86 +107,33 @@ is_trigger_char (gchar c)
   return (strchr (options.common_data.trigger_chars, c) != NULL);
 }
 
-static void
-update_trigger_completion (GtkEntry *entry, gchar trigger_char)
+/* Custom match function for trigger completion - matches all items when trigger is active */
+static gboolean
+trigger_match_func (GtkEntryCompletion *completion, const gchar *key, GtkTreeIter *iter, gpointer user_data)
 {
-  YadTriggerSource *src;
-  GtkEntryCompletion *completion;
-  GtkListStore *store;
-  GtkTreeIter iter;
-  FILE *pf;
-  gchar buf[1024];
+  GtkTreeModel *model;
+  gchar *item;
+  gboolean result = FALSE;
 
-  src = find_trigger_source (trigger_char);
-  if (!src || !src->source_cmd)
-    return;
+  /* If key is empty or doesn't start with a trigger, no match */
+  if (!key || strlen(key) == 0)
+    return FALSE;
 
-  completion = gtk_entry_get_completion (entry);
-  if (!completion)
-    return;
+  /* Check if first character is a trigger */
+  if (!is_trigger_char (key[0]))
+    return FALSE;
 
-  store = GTK_LIST_STORE (gtk_entry_completion_get_model (completion));
-  if (!store)
-    return;
+  model = gtk_entry_completion_get_model (completion);
+  gtk_tree_model_get (model, iter, 0, &item, -1);
 
-  /* Clear existing items */
-  gtk_list_store_clear (store);
-
-  /* Execute command and populate completion */
-  pf = popen (src->source_cmd, "r");
-  if (pf)
+  if (item)
     {
-      while (fgets (buf, sizeof (buf), pf))
-        {
-          /* Remove trailing newline */
-          gint len = strlen (buf);
-          if (len > 0 && buf[len - 1] == '\n')
-            buf[len - 1] = '\0';
-
-          if (buf[0] != '\0')
-            {
-              gchar *item;
-
-              /* Optionally include trigger prefix in completion item */
-              if (options.common_data.trigger_prefix)
-                item = g_strdup_printf ("%c%s", trigger_char, buf);
-              else
-                item = g_strdup (buf);
-
-              gtk_list_store_append (store, &iter);
-              gtk_list_store_set (store, &iter, 0, item, -1);
-              g_free (item);
-            }
-        }
-      pclose (pf);
+      /* Match if the item starts with the key (prefix match) */
+      result = g_str_has_prefix (item, key);
+      g_free (item);
     }
 
-  /* Force completion popup to show */
-  gtk_entry_completion_complete (completion);
-}
-
-static void
-trigger_entry_changed_cb (GtkEditable *editable, gpointer data)
-{
-  GtkEntry *entry = GTK_ENTRY (editable);
-  const gchar *text;
-  gint cursor_pos;
-
-  if (options.common_data.complete != YAD_COMPLETE_TRIGGER)
-    return;
-
-  text = gtk_entry_get_text (entry);
-  cursor_pos = gtk_editable_get_position (editable);
-
-  /* Check if the character before cursor is a trigger */
-  if (cursor_pos > 0 && text[cursor_pos - 1] != '\0')
-    {
-      gchar c = text[cursor_pos - 1];
-      if (is_trigger_char (c))
-        {
-          update_trigger_completion (entry, c);
-        }
-    }
+  return result;
 }
 
 static GtkTreeModel *
@@ -198,7 +145,45 @@ create_completion_model (void)
 
   store = gtk_list_store_new (1, G_TYPE_STRING);
 
-  if (options.extra_data)
+  /* For trigger completion, pre-populate from all sources */
+  if (options.common_data.complete == YAD_COMPLETE_TRIGGER)
+    {
+      GSList *l;
+      for (l = options.common_data.trigger_sources; l != NULL; l = l->next)
+        {
+          YadTriggerSource *src = (YadTriggerSource *) l->data;
+          FILE *pf;
+          gchar buf[1024];
+          
+          if (!src->source_cmd)
+            continue;
+            
+          pf = popen (src->source_cmd, "r");
+          if (pf)
+            {
+              while (fgets (buf, sizeof (buf), pf))
+                {
+                  gint len = strlen (buf);
+                  if (len > 0 && buf[len - 1] == '\n')
+                    buf[len - 1] = '\0';
+                    
+                  if (buf[0] != '\0')
+                    {
+                      gchar *item;
+                      
+                      /* Always prefix with trigger char for matching */
+                      item = g_strdup_printf ("%c%s", src->trigger_char, buf);
+                      
+                      gtk_list_store_append (store, &iter);
+                      gtk_list_store_set (store, &iter, 0, item, -1);
+                      g_free (item);
+                    }
+                }
+              pclose (pf);
+            }
+        }
+    }
+  else if (options.extra_data)
     {
       while (options.extra_data[i] != NULL)
         {
@@ -375,8 +360,11 @@ entry_create_widget (GtkWidget * dlg)
             {
               /* For trigger completion, set minimum key length to 1 */
               gtk_entry_completion_set_minimum_key_length (completion, 1);
-              /* Connect changed signal to detect trigger characters */
-              g_signal_connect (G_OBJECT (entry), "changed", G_CALLBACK (trigger_entry_changed_cb), NULL);
+              /* Enable popup and inline completion */
+              gtk_entry_completion_set_popup_completion (completion, TRUE);
+              gtk_entry_completion_set_inline_completion (completion, FALSE);
+              /* Set custom match function for trigger matching */
+              gtk_entry_completion_set_match_func (completion, trigger_match_func, NULL, NULL);
             }
           else if (options.common_data.complete != YAD_COMPLETE_SIMPLE)
             gtk_entry_completion_set_match_func (completion, check_complete, NULL, NULL);
