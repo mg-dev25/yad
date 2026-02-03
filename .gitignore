@@ -39,3 +39,6 @@ build.log
 *.gschema.valid
 ABOUT-NLS
 ChangeLog
+# Claude ephemeral files (auto-added)
+.claude/.command-checksums
+.taskmaster/config.json
